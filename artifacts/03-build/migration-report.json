@@ -1,0 +1,248 @@
+{
+  "kpis": {
+    "auto": 22,
+    "assisted": 7,
+    "manual": 1,
+    "confidencePct": 85,
+    "components": 17
+  },
+  "fileMapping": [
+    {
+      "source": "STG_SRC_CUSTOMER_DELTA",
+      "sourceType": "PxSequentialFile",
+      "target": "read_customer_delta() — spark.read.csv()",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.95,
+      "effort": "low",
+      "nodes": [
+        { "node": "read_source", "target": "spark.read.format('csv').option('header','true').option('delimiter',',').option('nullValue','NULL').option('encoding','UTF-8').option('dateFormat','yyyy-MM-dd').schema(CUST_DELTA_SCHEMA).load()", "score": 0.95, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "STG_SRC_SALES_TXN",
+      "sourceType": "PxSequentialFile",
+      "target": "read_sales_txn() — spark.read.csv()",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.95,
+      "effort": "low",
+      "nodes": [
+        { "node": "read_source", "target": "spark.read.format('csv').option('header','true').option('delimiter',',').option('nullValue','NULL').option('encoding','UTF-8').option('dateFormat','yyyy-MM-dd').schema(SALES_TXN_SCHEMA).load()", "score": 0.95, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "STG_REF_CUST_DIM_CURRENT",
+      "sourceType": "PxDB2Connector",
+      "target": "read_customer_dim_current() — spark.read.jdbc() with subquery",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.88,
+      "effort": "low",
+      "nodes": [
+        { "node": "read_reference", "target": "spark.read.format('jdbc').option('dbtable', subquery).load() — WHERE CURR_FLAG='Y' subquery, EDW. schema qualifier stripped to match DDL", "score": 0.88, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "GEN_SURR_KEY",
+      "sourceType": "PxSurrogateKeyGenerator",
+      "target": "get_next_cust_key_base() + per-row offset → unique surrogate keys",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.68,
+      "effort": "medium",
+      "nodes": [
+        { "node": "generate_surrogate_key", "target": "SELECT nextval('\"SEQ_CUSTOMER_DIM_KEY\"') via psycopg2 → base_key. Window.orderBy('CUST_ID').row_number() across combined Insert+Edit set → key = base_key + row_number - 1", "score": 0.68, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "LKP_CUSTOMER_ENRICH",
+      "sourceType": "PxLookup",
+      "target": "apply_customer_enrichment() — broadcast left join + reject split",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.72,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_lookup", "target": "df_sales_txn.join(broadcast(df_cust_dim_current), on='CUST_ID', how='left'). Unmatched → df_enrich_reject (ERROR_REASON='CUSTOMER_NOT_FOUND_IN_DIMENSION'). Matched → df_enriched.", "score": 0.72, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "XFM_DQ_VALIDATION",
+      "sourceType": "PxTransformer",
+      "target": "apply_dq_validation() — constraint filter + reject split",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.70,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_transformations", "target": "Pass: CUST_ID.notNull & AMOUNT>0 & QTY>0 & TXN_DATE.notNull. Reject: inverse, with when/otherwise ERROR_REASON derivation.", "score": 0.70, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "CHG_CUST_SCD_COMPARE",
+      "sourceType": "PxChangeCapture",
+      "target": "apply_change_capture() — full_outer join + CHANGE_CODE",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.65,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_change_capture", "target": "Full-outer join on CUST_ID. before.CUST_KEY isNull → Insert(1). Value columns differ → Edit(3). Otherwise Copy(0, dropped). Carries EXISTING_CUST_KEY for expire.", "score": 0.65, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "XFM_SCD_APPLY",
+      "sourceType": "PxTransformer",
+      "target": "apply_scd2_rules() — SCD2 expire/insert with unique keys",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.70,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_transformations", "target": "Expire (CHANGE_CODE=3): df_expire with CURR_FLAG='N', EXP_DATE=RUN_DATE-1. New version (CHANGE_CODE=1|3): df_new_version with base_key+row_number, CURR_FLAG='Y', EFF_DATE=RUN_DATE, EXP_DATE=HIGH_DATE. Row numbers assigned ONCE across combined Insert+Edit set, never independently per sub-group.", "score": 0.70, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "SRT_SALES_ENRICHED",
+      "sourceType": "PxSort",
+      "target": "sort_for_aggregation() — .orderBy()",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.92,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": ".orderBy(col('CUST_KEY').asc(), col('PRODUCT_ID').asc(), col('STORE_ID').asc())", "score": 0.92, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "AGG_SALES_SUMMARY",
+      "sourceType": "PxAggregator",
+      "target": "aggregate_sales() — .groupBy().agg()",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.75,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_transformations", "target": ".groupBy('CUST_KEY','PRODUCT_ID','STORE_ID','TXN_DATE').agg(sum('QTY'), sum('AMOUNT'), count('TXN_ID'), avg('UNIT_PRICE'))", "score": 0.75, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "FUN_ERROR_FUNNEL",
+      "sourceType": "PxFunnel",
+      "target": "funnel_errors() — .unionByName() + audit columns",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.88,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "Union of lnk_Enrich_Reject + lnk_DQ_Reject. Appends ERROR_TIMESTAMP=current_timestamp(), RUN_DATE.", "score": 0.88, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "TGT_CUSTOMER_DIM",
+      "sourceType": "PxDB2Connector",
+      "target": "write_customer_dim() — two-phase MERGE (UPDATE + INSERT)",
+      "disposition": "manual",
+      "tier": "manual",
+      "score": 0.50,
+      "effort": "high",
+      "nodes": [
+        { "node": "ensure_table_exists", "target": "psycopg2: CREATE TABLE IF NOT EXISTS \"CUSTOMER_DIM\" with 11 columns, PK (\"CUST_KEY\")", "score": 0.88, "tier": "verify", "effort": "low" },
+        { "node": "write_postgres", "target": "REDESIGN: Phase A — psycopg2 UPDATE existing rows (SET CURR_FLAG='N', EXP_DATE). Phase B — JDBC append new version rows with fresh surrogate keys.", "score": 0.50, "tier": "manual", "effort": "high" }
+      ]
+    },
+    {
+      "source": "TGT_SALES_FACT",
+      "sourceType": "PxDB2Connector",
+      "target": "write_sales_fact() — JDBC append",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.88,
+      "effort": "low",
+      "nodes": [
+        { "node": "ensure_table_exists", "target": "psycopg2: CREATE TABLE IF NOT EXISTS \"SALES_FACT\" with 8 columns, composite PK", "score": 0.88, "tier": "verify", "effort": "low" },
+        { "node": "write_postgres", "target": "df.write.format('jdbc').mode('append').option('dbtable','\"SALES_FACT\"').save()", "score": 0.88, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "TGT_ERROR_LOG",
+      "sourceType": "PxSequentialFile",
+      "target": "write_error_log() — CSV overwrite",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.95,
+      "effort": "low",
+      "nodes": [
+        { "node": "write_output", "target": "df.write.format('csv').option('header','true').mode('overwrite').save(f'{ERR_DIR}/sales_errors_{RUN_DATE}.dat')", "score": 0.95, "tier": "verify", "effort": "low" }
+      ]
+    }
+  ],
+  "typeMap": [
+    { "field": "CUST_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "CUST_NAME", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(100)" },
+    { "field": "ADDRESS", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(150)" },
+    { "field": "CITY", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(60)" },
+    { "field": "STATE", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "ZIP", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(10)" },
+    { "field": "SEGMENT", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "SOURCE_SYSTEM", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(15)" },
+    { "field": "TXN_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(25)" },
+    { "field": "PRODUCT_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "STORE_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(15)" },
+    { "field": "CHANNEL", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(15)" },
+    { "field": "CURR_FLAG", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(1)" },
+    { "field": "ERROR_REASON", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(50)" },
+    { "field": "CUST_KEY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "EXISTING_CUST_KEY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "CHANGE_CODE", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "QTY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "TOTAL_QTY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "TXN_COUNT", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "EFF_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "EXP_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "TXN_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "RUN_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "UNIT_PRICE", "datastage": "DECIMAL", "spark": "DecimalType(12,2)", "postgres": "NUMERIC(12,2)" },
+    { "field": "AMOUNT", "datastage": "DECIMAL", "spark": "DecimalType(14,2)", "postgres": "NUMERIC(14,2)" },
+    { "field": "TOTAL_AMOUNT", "datastage": "DECIMAL", "spark": "DecimalType(15,2)", "postgres": "NUMERIC(15,2)" },
+    { "field": "AVG_UNIT_PRICE", "datastage": "DECIMAL", "spark": "DecimalType(12,2)", "postgres": "NUMERIC(12,2)" },
+    { "field": "ERROR_TIMESTAMP", "datastage": "TIMESTAMP", "spark": "TimestampType()", "postgres": "TIMESTAMP" }
+  ],
+  "connections": [
+    {
+      "id": "TGT_CUSTOMER_DIM",
+      "table": "CUSTOMER_DIM",
+      "write_mode": "upsert",
+      "pyspark_mode": "UNSUPPORTED — manual MERGE: UPDATE (psycopg2) + INSERT (JDBC append)",
+      "ddl": "CREATE TABLE IF NOT EXISTS \"CUSTOMER_DIM\" (\"CUST_KEY\" INTEGER NOT NULL, \"CUST_ID\" VARCHAR(20) NOT NULL, \"CUST_NAME\" VARCHAR(100) NOT NULL, \"ADDRESS\" VARCHAR(150), \"CITY\" VARCHAR(60), \"STATE\" VARCHAR(20), \"ZIP\" VARCHAR(10), \"SEGMENT\" VARCHAR(20), \"EFF_DATE\" DATE NOT NULL, \"EXP_DATE\" DATE NOT NULL, \"CURR_FLAG\" VARCHAR(1) NOT NULL, PRIMARY KEY (\"CUST_KEY\"))",
+      "disposition": "manual",
+      "reason": "write_mode=upsert requires manual SCD2 MERGE: Phase A (UPDATE existing rows via psycopg2) + Phase B (INSERT new versions via JDBC append)"
+    },
+    {
+      "id": "TGT_SALES_FACT",
+      "table": "SALES_FACT",
+      "write_mode": "insert",
+      "pyspark_mode": "append",
+      "ddl": "CREATE TABLE IF NOT EXISTS \"SALES_FACT\" (\"CUST_KEY\" INTEGER, \"PRODUCT_ID\" VARCHAR(20), \"STORE_ID\" VARCHAR(15), \"TXN_DATE\" DATE, \"TOTAL_QTY\" INTEGER, \"TOTAL_AMOUNT\" NUMERIC(15,2), \"TXN_COUNT\" INTEGER, \"AVG_UNIT_PRICE\" NUMERIC(12,2), PRIMARY KEY (\"CUST_KEY\",\"PRODUCT_ID\",\"STORE_ID\",\"TXN_DATE\"))",
+      "disposition": "auto",
+      "reason": ""
+    },
+    {
+      "id": "TGT_ERROR_LOG",
+      "table": "sales_errors_#RUN_DATE#.dat",
+      "write_mode": "overwrite",
+      "pyspark_mode": "overwrite",
+      "ddl": "",
+      "disposition": "auto",
+      "reason": ""
+    }
+  ],
+  "ddl": {
+    "postgres": "CREATE TABLE IF NOT EXISTS \"CUSTOMER_DIM\" (\"CUST_KEY\" INTEGER NOT NULL, \"CUST_ID\" VARCHAR(20) NOT NULL, \"CUST_NAME\" VARCHAR(100) NOT NULL, \"ADDRESS\" VARCHAR(150), \"CITY\" VARCHAR(60), \"STATE\" VARCHAR(20), \"ZIP\" VARCHAR(10), \"SEGMENT\" VARCHAR(20), \"EFF_DATE\" DATE NOT NULL, \"EXP_DATE\" DATE NOT NULL, \"CURR_FLAG\" VARCHAR(1) NOT NULL, PRIMARY KEY (\"CUST_KEY\"))"
+  },
+  "writeMode": "upsert → manual MERGE (psycopg2 UPDATE + JDBC append)",
+  "reviewQueue": [
+    "TGT_CUSTOMER_DIM: write_mode=upsert requires manual SCD2 MERGE — psycopg2 UPDATE for expire + JDBC append for new versions, keyed on CUST_KEY"
+  ]
+}

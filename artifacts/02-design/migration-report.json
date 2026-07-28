@@ -1,0 +1,438 @@
+{
+  "kpis": {
+    "auto": 22,
+    "assisted": 7,
+    "manual": 1,
+    "confidencePct": 85,
+    "components": 10
+  },
+  "fileMapping": [
+    {
+      "source": "STG_SRC_CUSTOMER_DELTA",
+      "sourceType": "PxSequentialFile",
+      "target": "read_source() · spark.read.format('csv').option('header','true').option('delimiter',',').option('nullValue','NULL').option('encoding','UTF-8').option('dateFormat','yyyy-MM-dd')",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.95,
+      "effort": "low",
+      "nodes": [
+        { "node": "read_source", "target": "spark.read.format('csv').load(file_path, schema=cust_delta_schema)", "score": 0.95, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "STG_SRC_SALES_TXN",
+      "sourceType": "PxSequentialFile",
+      "target": "read_source() · spark.read.format('csv').option('header','true').option('delimiter',',').option('nullValue','NULL').option('encoding','UTF-8').option('dateFormat','yyyy-MM-dd')",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.95,
+      "effort": "low",
+      "nodes": [
+        { "node": "read_source", "target": "spark.read.format('csv').load(file_path, schema=sales_txn_schema)", "score": 0.95, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "STG_REF_CUST_DIM_CURRENT",
+      "sourceType": "PxDB2Connector",
+      "target": "read_reference() · spark.read.format('jdbc').option('dbtable', select_statement)",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.88,
+      "effort": "low",
+      "nodes": [
+        { "node": "read_reference", "target": "spark.read.format('jdbc').load() with SELECT CUST_KEY,... FROM EDW.CUSTOMER_DIM WHERE CURR_FLAG='Y'. Broadcast for downstream lookup.", "score": 0.88, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "GEN_SURR_KEY",
+      "sourceType": "PxSurrogateKeyGenerator",
+      "target": "generate_surrogate_key() · resumable DB sequence EDW.SEQ_CUSTOMER_DIM_KEY → NEW_CUST_KEY",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.68,
+      "effort": "medium",
+      "nodes": [
+        { "node": "generate_surrogate_key", "target": "Read next value from Postgres SEQUENCE EDW.SEQ_CUSTOMER_DIM_KEY via JDBC. Resumable across runs. NOT monotonically_increasing_id().", "score": 0.68, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "LKP_CUSTOMER_ENRICH",
+      "sourceType": "PxLookup",
+      "target": "apply_lookup() · broadcast join on CUST_ID with reject routing",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.72,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_lookup", "target": "sales_txn.join(broadcast(cust_dim_current), 'CUST_ID', 'left'). Unmatched rows (CUST_KEY is null) → reject link. Matched rows → main output.", "score": 0.72, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "XFM_DQ_VALIDATION",
+      "sourceType": "PxTransformer",
+      "target": "apply_transformations() · withColumn/expr for constraint evaluation + row splitting",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.70,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_transformations", "target": "Apply DQ constraints: pass condition=Not(IsNull(CUST_ID)) AND AMOUNT>0 AND QTY>0 AND Not(IsNull(TXN_DATE)). Reject condition=IsNull(CUST_ID) OR AMOUNT<=0 OR QTY<=0 OR IsNull(TXN_DATE). Split into two DataFrames: dq_pass + dq_reject with ERROR_REASON column.", "score": 0.70, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "CHG_CUST_SCD_COMPARE",
+      "sourceType": "PxChangeCapture",
+      "target": "apply_change_capture() · full_outer join + CHANGE_CODE classification",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.65,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_change_capture", "target": "Full-outer join cust_delta (after) with cust_dim_current (before) on CUST_ID. Compare value columns (CUST_NAME,ADDRESS,CITY,STATE,ZIP,SEGMENT) → CHANGE_CODE: 0=Copy (drop), 1=Insert, 3=Edit. ValueColumns comparison via when/otherwise on each column.", "score": 0.65, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "XFM_SCD_APPLY",
+      "sourceType": "PxTransformer",
+      "target": "apply_transformations() · SCD2 expire/insert logic with surrogate key",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.70,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_transformations", "target": "SCD2 rules: CHANGE_CODE=3 (Edit) → expire_row (CURR_FLAG='N', EXP_DATE=RUN_DATE-1); CHANGE_CODE=1 OR CHANGE_CODE=3 → new_version_row (CUST_KEY=NEW_CUST_KEY, EFF_DATE=RUN_DATE, EXP_DATE=HIGH_DATE, CURR_FLAG='Y'). Two output DataFrames: expire + insert.", "score": 0.70, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "SRT_SALES_ENRICHED",
+      "sourceType": "PxSort",
+      "target": "apply_transformations() · .orderBy('CUST_KEY','PRODUCT_ID','STORE_ID')",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.92,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": ".orderBy(col('CUST_KEY').asc(), col('PRODUCT_ID').asc(), col('STORE_ID').asc())", "score": 0.92, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "AGG_SALES_SUMMARY",
+      "sourceType": "PxAggregator",
+      "target": "apply_transformations() · .groupBy().agg()",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.75,
+      "effort": "medium",
+      "nodes": [
+        { "node": "apply_transformations", "target": ".groupBy('CUST_KEY','PRODUCT_ID','STORE_ID','TXN_DATE').agg(sum('QTY').alias('TOTAL_QTY'), sum('AMOUNT').alias('TOTAL_AMOUNT'), count('TXN_ID').alias('TXN_COUNT'), avg('UNIT_PRICE').alias('AVG_UNIT_PRICE'))", "score": 0.75, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "FUN_ERROR_FUNNEL",
+      "sourceType": "PxFunnel",
+      "target": "apply_transformations() · .union() of reject streams",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.88,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "Union of lnk_Enrich_Reject and lnk_DQ_Reject DataFrames. Add ERROR_TIMESTAMP=current_timestamp(), RUN_DATE. Ensure consistent column list.", "score": 0.88, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "TGT_CUSTOMER_DIM",
+      "sourceType": "PxDB2Connector",
+      "target": "ensure_table_exists() + write_postgres() · JDBC write with upsert (MERGE)",
+      "disposition": "manual",
+      "tier": "manual",
+      "score": 0.50,
+      "effort": "high",
+      "nodes": [
+        { "node": "ensure_table_exists", "target": "CREATE TABLE IF NOT EXISTS CUSTOMER_DIM with 11 columns, PRIMARY KEY (CUST_KEY)", "score": 0.88, "tier": "verify", "effort": "low" },
+        { "node": "write_postgres", "target": "REDESIGN: write_mode=upsert has no direct PySpark mode. Implement MERGE/MERGE-INTO: UPDATE existing rows SET EXP_DATE, CURR_FLAG='N'; INSERT new version rows. Requires Postgres MERGE or staged approach.", "score": 0.50, "tier": "manual", "effort": "high" }
+      ]
+    },
+    {
+      "source": "TGT_SALES_FACT",
+      "sourceType": "PxDB2Connector",
+      "target": "ensure_table_exists() + write_postgres() · JDBC append",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.88,
+      "effort": "low",
+      "nodes": [
+        { "node": "ensure_table_exists", "target": "CREATE TABLE IF NOT EXISTS SALES_FACT with 8 columns, PRIMARY KEY (CUST_KEY,PRODUCT_ID,STORE_ID,TXN_DATE)", "score": 0.88, "tier": "verify", "effort": "low" },
+        { "node": "write_postgres", "target": "df.write.format('jdbc').mode('append').save() to EDW.SALES_FACT", "score": 0.88, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "TGT_ERROR_LOG",
+      "sourceType": "PxSequentialFile",
+      "target": "write_output() · spark.write.format('csv').mode('overwrite')",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.95,
+      "effort": "low",
+      "nodes": [
+        { "node": "write_output", "target": "df.write.format('csv').mode('overwrite').option('header','true').save(f'{ERR_DIR}/sales_errors_{RUN_DATE}.dat')", "score": 0.95, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_CustDelta_Out",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from STG_SRC_CUSTOMER_DELTA to LKP_CUSTOMER_ENRICH",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_cust_delta → lookup_enrich primary stream input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_SalesTxn_Out",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from STG_SRC_SALES_TXN to LKP_CUSTOMER_ENRICH",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_sales_txn → lookup_enrich secondary stream input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_CustDimCurrent_Out",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from STG_REF_CUST_DIM_CURRENT to LKP_CUSTOMER_ENRICH",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_cust_dim_current → lookup_enrich reference input (broadcast)", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_Enriched_Out",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from LKP_CUSTOMER_ENRICH to XFM_DQ_VALIDATION",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_enriched → dq_validation input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_Enrich_Reject",
+      "sourceType": "link",
+      "target": "route_reject() · Reject link from LKP_CUSTOMER_ENRICH to FUN_ERROR_FUNNEL",
+      "disposition": "assisted",
+      "tier": "review",
+      "score": 0.72,
+      "effort": "medium",
+      "nodes": [
+        { "node": "route_reject", "target": "Filter unmatched rows (CUST_KEY is null after left join). Add ERROR_REASON='CUSTOMER_NOT_FOUND_IN_DIMENSION'. Route to error funnel.", "score": 0.72, "tier": "review", "effort": "medium" }
+      ]
+    },
+    {
+      "source": "lnk_DQ_Pass",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from XFM_DQ_VALIDATION to SRT_SALES_ENRICHED",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_dq_pass → sort input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_DQ_Reject",
+      "sourceType": "link",
+      "target": "apply_transformations() · DQ reject DataFrame from XFM_DQ_VALIDATION to FUN_ERROR_FUNNEL",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_dq_reject (with ERROR_REASON column) → error funnel input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_Before_CustDimCurrent",
+      "sourceType": "link",
+      "target": "apply_transformations() · Input link from STG_REF_CUST_DIM_CURRENT to CHG_CUST_SCD_COMPARE (before side)",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_cust_dim_current → change_capture 'before' input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_After_CustDelta",
+      "sourceType": "link",
+      "target": "apply_transformations() · Input link from STG_SRC_CUSTOMER_DELTA to CHG_CUST_SCD_COMPARE (after side)",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_cust_delta → change_capture 'after' input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_ChangeOut",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from CHG_CUST_SCD_COMPARE to XFM_SCD_APPLY",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_change_out (with CHANGE_CODE + EXISTING_CUST_KEY) → scd_apply input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_SurrKeyOut",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame from GEN_SURR_KEY to XFM_SCD_APPLY (NEW_CUST_KEY column)",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "NEW_CUST_KEY column (from sequence) → scd_apply for new/versioned rows", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_ExpireRow",
+      "sourceType": "link",
+      "target": "apply_transformations() · Expire row output from XFM_SCD_APPLY to TGT_CUSTOMER_DIM",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_expire (CURR_FLAG='N', EXP_DATE=RUN_DATE-1) → CUSTOMER_DIM upsert (UPDATE path)", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_NewVersionRow",
+      "sourceType": "link",
+      "target": "apply_transformations() · New version row output from XFM_SCD_APPLY to TGT_CUSTOMER_DIM",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_new_version (CURR_FLAG='Y', EFF_DATE=RUN_DATE, EXP_DATE=HIGH_DATE) → CUSTOMER_DIM upsert (INSERT path)", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_Sorted_Out",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from SRT_SALES_ENRICHED to AGG_SALES_SUMMARY",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_sorted → aggregator input", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_Aggregated_Out",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from AGG_SALES_SUMMARY to TGT_SALES_FACT",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_aggregated → SALES_FACT JDBC append", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    },
+    {
+      "source": "lnk_FunnelOut",
+      "sourceType": "link",
+      "target": "apply_transformations() · DataFrame passing from FUN_ERROR_FUNNEL to TGT_ERROR_LOG",
+      "disposition": "auto",
+      "tier": "verify",
+      "score": 0.90,
+      "effort": "low",
+      "nodes": [
+        { "node": "apply_transformations", "target": "df_funneled_errors → error log CSV write", "score": 0.90, "tier": "verify", "effort": "low" }
+      ]
+    }
+  ],
+  "typeMap": [
+    { "field": "CUST_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "CUST_NAME", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(100)" },
+    { "field": "ADDRESS", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(150)" },
+    { "field": "CITY", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(60)" },
+    { "field": "STATE", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "ZIP", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(10)" },
+    { "field": "SEGMENT", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "SOURCE_SYSTEM", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(15)" },
+    { "field": "TXN_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(25)" },
+    { "field": "PRODUCT_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(20)" },
+    { "field": "STORE_ID", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(15)" },
+    { "field": "CHANNEL", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(15)" },
+    { "field": "CURR_FLAG", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(1)" },
+    { "field": "ERROR_REASON", "datastage": "VARCHAR", "spark": "StringType()", "postgres": "VARCHAR(50)" },
+    { "field": "CUST_KEY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "EXISTING_CUST_KEY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "CHANGE_CODE", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "QTY", "datastage": "INTEGER", "spark": "IntegerType()", "postgres": "INTEGER" },
+    { "field": "EFF_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "EXP_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "TXN_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "RUN_DATE", "datastage": "DATE", "spark": "DateType()", "postgres": "DATE" },
+    { "field": "UNIT_PRICE", "datastage": "DECIMAL", "spark": "DecimalType(12,2)", "postgres": "NUMERIC(12,2)" },
+    { "field": "AMOUNT", "datastage": "DECIMAL", "spark": "DecimalType(14,2)", "postgres": "NUMERIC(14,2)" },
+    { "field": "TOTAL_AMOUNT", "datastage": "DECIMAL", "spark": "DecimalType(15,2)", "postgres": "NUMERIC(15,2)" },
+    { "field": "AVG_UNIT_PRICE", "datastage": "DECIMAL", "spark": "DecimalType(12,2)", "postgres": "NUMERIC(12,2)" },
+    { "field": "ERROR_TIMESTAMP", "datastage": "TIMESTAMP", "spark": "TimestampType()", "postgres": "TIMESTAMP" }
+  ],
+  "connections": [
+    {
+      "id": "TGT_CUSTOMER_DIM",
+      "table": "EDW.CUSTOMER_DIM",
+      "write_mode": "upsert",
+      "pyspark_mode": "UNSUPPORTED — requires merge/MERGE-INTO logic (redesign band)",
+      "ddl": "CREATE TABLE IF NOT EXISTS \"CUSTOMER_DIM\"\n(\"CUST_KEY\" INTEGER NOT NULL,\n\"CUST_ID\" VARCHAR(20) NOT NULL,\n\"CUST_NAME\" VARCHAR(100) NOT NULL,\n\"ADDRESS\" VARCHAR(150),\n\"CITY\" VARCHAR(60),\n\"STATE\" VARCHAR(20),\n\"ZIP\" VARCHAR(10),\n\"SEGMENT\" VARCHAR(20),\n\"EFF_DATE\" DATE NOT NULL,\n\"EXP_DATE\" DATE NOT NULL,\n\"CURR_FLAG\" VARCHAR(1) NOT NULL,\nPRIMARY KEY (\"CUST_KEY\")\n)",
+      "disposition": "manual",
+      "reason": "write_mode=upsert has no direct PySpark equivalent (UNSUPPORTED — requires merge/MERGE-INTO logic (redesign band))"
+    },
+    {
+      "id": "TGT_SALES_FACT",
+      "table": "EDW.SALES_FACT",
+      "write_mode": "insert",
+      "pyspark_mode": "append",
+      "ddl": "CREATE TABLE IF NOT EXISTS \"SALES_FACT\"\n(\"CUST_KEY\" INTEGER,\n\"PRODUCT_ID\" VARCHAR(20),\n\"STORE_ID\" VARCHAR(15),\n\"TXN_DATE\" DATE,\n\"TOTAL_QTY\" INTEGER,\n\"TOTAL_AMOUNT\" NUMERIC(15, 2),\n\"TXN_COUNT\" INTEGER,\n\"AVG_UNIT_PRICE\" NUMERIC(12, 2),\nPRIMARY KEY (\"CUST_KEY\", \"PRODUCT_ID\", \"STORE_ID\", \"TXN_DATE\")\n)",
+      "disposition": "auto",
+      "reason": ""
+    },
+    {
+      "id": "TGT_ERROR_LOG",
+      "table": "#ERR_DIR#/sales_errors_#RUN_DATE#.dat",
+      "write_mode": "overwrite",
+      "pyspark_mode": "overwrite",
+      "ddl": "",
+      "disposition": "auto",
+      "reason": ""
+    }
+  ],
+  "ddl": {
+    "postgres": "CREATE TABLE IF NOT EXISTS \"CUSTOMER_DIM\"\n(\"CUST_KEY\" INTEGER NOT NULL,\n\"CUST_ID\" VARCHAR(20) NOT NULL,\n\"CUST_NAME\" VARCHAR(100) NOT NULL,\n\"ADDRESS\" VARCHAR(150),\n\"CITY\" VARCHAR(60),\n\"STATE\" VARCHAR(20),\n\"ZIP\" VARCHAR(10),\n\"SEGMENT\" VARCHAR(20),\n\"EFF_DATE\" DATE NOT NULL,\n\"EXP_DATE\" DATE NOT NULL,\n\"CURR_FLAG\" VARCHAR(1) NOT NULL,\nPRIMARY KEY (\"CUST_KEY\")\n)"
+  },
+  "writeMode": "upsert → UNSUPPORTED (merge/MERGE-INTO required)",
+  "reviewQueue": [
+    "TGT_CUSTOMER_DIM: write_mode=upsert has no direct PySpark equivalent, requires MERGE/MERGE-INTO on CUST_KEY"
+  ]
+}

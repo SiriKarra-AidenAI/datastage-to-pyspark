@@ -1,0 +1,42 @@
+{
+  "complexity_metrics": {
+    "distribution": {
+      "simple": 6,
+      "moderate": 4,
+      "complex": 3,
+      "very_complex": 1
+    },
+    "totals": {
+      "imports": 16,
+      "functions": 17,
+      "variables": 58
+    },
+    "files": [
+      { "name": "STG_SRC_CUSTOMER_DELTA", "type": "stage", "size": 1, "imports": 2, "functions": 1, "variables": 9, "classification": "simple" },
+      { "name": "STG_SRC_SALES_TXN", "type": "stage", "size": 1, "imports": 1, "functions": 1, "variables": 9, "classification": "simple" },
+      { "name": "STG_REF_CUST_DIM_CURRENT", "type": "stage", "size": 2, "imports": 2, "functions": 1, "variables": 11, "classification": "simple" },
+      { "name": "GEN_SURR_KEY", "type": "stage", "size": 1, "imports": 1, "functions": 1, "variables": 0, "classification": "simple" },
+      { "name": "LKP_CUSTOMER_ENRICH", "type": "stage", "size": 3, "imports": 3, "functions": 1, "variables": 15, "classification": "complex" },
+      { "name": "XFM_DQ_VALIDATION", "type": "stage", "size": 2, "imports": 2, "functions": 1, "variables": 6, "classification": "moderate" },
+      { "name": "CHG_CUST_SCD_COMPARE", "type": "stage", "size": 2, "imports": 2, "functions": 1, "variables": 9, "classification": "complex" },
+      { "name": "XFM_SCD_APPLY", "type": "stage", "size": 3, "imports": 3, "functions": 1, "variables": 9, "classification": "moderate" },
+      { "name": "SRT_SALES_ENRICHED", "type": "stage", "size": 1, "imports": 1, "functions": 1, "variables": 12, "classification": "simple" },
+      { "name": "AGG_SALES_SUMMARY", "type": "stage", "size": 1, "imports": 1, "functions": 1, "variables": 8, "classification": "moderate" },
+      { "name": "FUN_ERROR_FUNNEL", "type": "stage", "size": 2, "imports": 2, "functions": 1, "variables": 5, "classification": "simple" },
+      { "name": "TGT_CUSTOMER_DIM", "type": "stage", "size": 2, "imports": 2, "functions": 2, "variables": 11, "classification": "very_complex" },
+      { "name": "TGT_SALES_FACT", "type": "stage", "size": 1, "imports": 1, "functions": 2, "variables": 8, "classification": "moderate" },
+      { "name": "TGT_ERROR_LOG", "type": "stage", "size": 1, "imports": 1, "functions": 1, "variables": 5, "classification": "simple" }
+    ]
+  },
+  "usage_analytics": {
+    "hotspots": [
+      { "name": "LKP_CUSTOMER_ENRICH", "detail": "Central lookup stage: 3 incoming links from all sources + 2 outgoing (output + reject). Highest fan-in in pipeline.", "refs": 5, "risk": "high" },
+      { "name": "EDW.CUSTOMER_DIM", "detail": "Referenced as both reference source (STG_REF_CUST_DIM_CURRENT) and sink target (TGT_CUSTOMER_DIM). SCD2 dimension table.", "refs": 2, "risk": "medium" },
+      { "name": "FUN_ERROR_FUNNEL", "detail": "Consolidates rejects from two separate error sources (Lookup + DQ validation). Shared error path.", "refs": 3, "risk": "medium" },
+      { "name": "XFM_SCD_APPLY", "detail": "SCD2 rule engine: 3 inputs (ChangeCapture + SurrogateKey + Generator), 2 outputs to CUSTOMER_DIM. Complex fan-in/out.", "refs": 5, "risk": "high" }
+    ],
+    "dead_code": [
+      { "label": "Empty/unused schema definitions", "count": 0 }
+    ]
+  }
+}

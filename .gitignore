@@ -1,0 +1,32 @@
+# Git ignore for DataStage-to-PySpark migration project
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Internal run state (not source artifacts)
+.gate/
+.stage-results/
+.stage-events/
+.jcode/
+.capability.json
+skill-pins.json
+state.json
+
+# Internal audit/runtime traces
+audit/
+
+# Scratch/temp files
+_zip.py
+_check_sql.py
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

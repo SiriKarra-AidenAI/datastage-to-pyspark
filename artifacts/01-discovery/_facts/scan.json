@@ -1,0 +1,436 @@
+{
+  "source_platform": "IBM DataStage",
+  "source_root": "C:\\Users\\SiriKarra\\Desktop\\work\\agenticLifeCycle\\adlc-service\\data\\orgs\\s4wf5itv\\workspaces\\6675490a-be38-4942-9ed6-b0fef4a1693a\\files\\legacy\\DS_Job_XML.xml",
+  "summary": {
+    "jobs": 1,
+    "stages": 14,
+    "links": 16,
+    "connections": 3,
+    "schemas": 7,
+    "fields": 58
+  },
+  "jobs": [
+    {
+      "id": "JB_CUST_SALES_SCD_AGG",
+      "label": "JB_CUST_SALES_SCD_AGG",
+      "is_primary": true,
+      "runtime": "pxOsh",
+      "encoding": "UTF-8"
+    }
+  ],
+  "stages": [
+    {
+      "id": "STG_SRC_CUSTOMER_DELTA",
+      "op": "PxSequentialFile",
+      "label": "STG_SRC_CUSTOMER_DELTA",
+      "role": "source",
+      "pyspark_methods": ["read_source"]
+    },
+    {
+      "id": "STG_SRC_SALES_TXN",
+      "op": "PxSequentialFile",
+      "label": "STG_SRC_SALES_TXN",
+      "role": "source",
+      "pyspark_methods": ["read_source"]
+    },
+    {
+      "id": "STG_REF_CUST_DIM_CURRENT",
+      "op": "PxDB2Connector",
+      "label": "STG_REF_CUST_DIM_CURRENT",
+      "role": "source",
+      "pyspark_methods": ["read_reference"]
+    },
+    {
+      "id": "LKP_CUSTOMER_ENRICH",
+      "op": "PxLookup",
+      "label": "LKP_CUSTOMER_ENRICH",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "XFM_DQ_VALIDATION",
+      "op": "PxTransformer",
+      "label": "XFM_DQ_VALIDATION",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "CHG_CUST_SCD_COMPARE",
+      "op": "PxChangeCapture",
+      "label": "CHG_CUST_SCD_COMPARE",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "GEN_SURR_KEY",
+      "op": "PxSurrogateKeyGenerator",
+      "label": "GEN_SURR_KEY",
+      "role": "source",
+      "pyspark_methods": ["generate_output"]
+    },
+    {
+      "id": "XFM_SCD_APPLY",
+      "op": "PxTransformer",
+      "label": "XFM_SCD_APPLY",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "SRT_SALES_ENRICHED",
+      "op": "PxSort",
+      "label": "SRT_SALES_ENRICHED",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "AGG_SALES_SUMMARY",
+      "op": "PxAggregator",
+      "label": "AGG_SALES_SUMMARY",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "FUN_ERROR_FUNNEL",
+      "op": "PxFunnel",
+      "label": "FUN_ERROR_FUNNEL",
+      "role": "transform",
+      "pyspark_methods": ["apply_transformations"]
+    },
+    {
+      "id": "TGT_CUSTOMER_DIM",
+      "op": "PxDB2Connector",
+      "label": "TGT_CUSTOMER_DIM",
+      "role": "sink",
+      "pyspark_methods": ["ensure_table_exists", "write_postgres"]
+    },
+    {
+      "id": "TGT_SALES_FACT",
+      "op": "PxDB2Connector",
+      "label": "TGT_SALES_FACT",
+      "role": "sink",
+      "pyspark_methods": ["ensure_table_exists", "write_postgres"]
+    },
+    {
+      "id": "TGT_ERROR_LOG",
+      "op": "PxSequentialFile",
+      "label": "TGT_ERROR_LOG",
+      "role": "sink",
+      "pyspark_methods": ["write_output"]
+    }
+  ],
+  "links": [
+    {
+      "name": "lnk_CustDelta_Out",
+      "from_node": "STG_SRC_CUSTOMER_DELTA",
+      "to_node": "LKP_CUSTOMER_ENRICH",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_SalesTxn_Out",
+      "from_node": "STG_SRC_SALES_TXN",
+      "to_node": "LKP_CUSTOMER_ENRICH",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_CustDimCurrent_Out",
+      "from_node": "STG_REF_CUST_DIM_CURRENT",
+      "to_node": "LKP_CUSTOMER_ENRICH",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_Enriched_Out",
+      "from_node": "LKP_CUSTOMER_ENRICH",
+      "to_node": "XFM_DQ_VALIDATION",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_Enrich_Reject",
+      "from_node": "LKP_CUSTOMER_ENRICH",
+      "to_node": "FUN_ERROR_FUNNEL",
+      "pyspark_method": "route_reject"
+    },
+    {
+      "name": "lnk_DQ_Pass",
+      "from_node": "XFM_DQ_VALIDATION",
+      "to_node": "SRT_SALES_ENRICHED",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_DQ_Reject",
+      "from_node": "XFM_DQ_VALIDATION",
+      "to_node": "FUN_ERROR_FUNNEL",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_Before_CustDimCurrent",
+      "from_node": "STG_REF_CUST_DIM_CURRENT",
+      "to_node": "CHG_CUST_SCD_COMPARE",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_After_CustDelta",
+      "from_node": "STG_SRC_CUSTOMER_DELTA",
+      "to_node": "CHG_CUST_SCD_COMPARE",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_ChangeOut",
+      "from_node": "CHG_CUST_SCD_COMPARE",
+      "to_node": "XFM_SCD_APPLY",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_SurrKeyOut",
+      "from_node": "GEN_SURR_KEY",
+      "to_node": "XFM_SCD_APPLY",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_ExpireRow",
+      "from_node": "XFM_SCD_APPLY",
+      "to_node": "TGT_CUSTOMER_DIM",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_NewVersionRow",
+      "from_node": "XFM_SCD_APPLY",
+      "to_node": "TGT_CUSTOMER_DIM",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_Sorted_Out",
+      "from_node": "SRT_SALES_ENRICHED",
+      "to_node": "AGG_SALES_SUMMARY",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_Aggregated_Out",
+      "from_node": "AGG_SALES_SUMMARY",
+      "to_node": "TGT_SALES_FACT",
+      "pyspark_method": "apply_transformations"
+    },
+    {
+      "name": "lnk_FunnelOut",
+      "from_node": "FUN_ERROR_FUNNEL",
+      "to_node": "TGT_ERROR_LOG",
+      "pyspark_method": "apply_transformations"
+    }
+  ],
+  "schemas": [
+    {
+      "id": "lnk_CustDelta_Out",
+      "fields": [
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": true, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "CUST_NAME", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": false, "max_length": 100, "precision": 100, "scale": 0},
+        {"name": "ADDRESS", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 150, "precision": 150, "scale": 0},
+        {"name": "CITY", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 60, "precision": 60, "scale": 0},
+        {"name": "STATE", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "ZIP", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "SEGMENT", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "SOURCE_SYSTEM", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 15, "precision": 15, "scale": 0},
+        {"name": "EFF_DATE", "type_code": "DATE", "odbc_type": "DATE", "nullable": false, "is_key": false, "max_length": 0, "precision": 0, "scale": 0}
+      ]
+    },
+    {
+      "id": "lnk_SalesTxn_Out",
+      "fields": [
+        {"name": "TXN_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": true, "max_length": 25, "precision": 25, "scale": 0},
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "PRODUCT_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "STORE_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 15, "precision": 15, "scale": 0},
+        {"name": "CHANNEL", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 15, "precision": 15, "scale": 0},
+        {"name": "TXN_DATE", "type_code": "DATE", "odbc_type": "DATE", "nullable": false, "is_key": false, "max_length": 0, "precision": 0, "scale": 0},
+        {"name": "QTY", "type_code": "INTEGER", "odbc_type": "INTEGER", "nullable": false, "is_key": false, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "UNIT_PRICE", "type_code": "DECIMAL", "odbc_type": "DECIMAL", "nullable": false, "is_key": false, "max_length": 12, "precision": 12, "scale": 2},
+        {"name": "AMOUNT", "type_code": "DECIMAL", "odbc_type": "DECIMAL", "nullable": false, "is_key": false, "max_length": 14, "precision": 14, "scale": 2}
+      ]
+    },
+    {
+      "id": "lnk_CustDimCurrent_Out",
+      "fields": [
+        {"name": "CUST_KEY", "type_code": "INTEGER", "odbc_type": "INTEGER", "nullable": false, "is_key": true, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "CUST_NAME", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": false, "max_length": 100, "precision": 100, "scale": 0},
+        {"name": "ADDRESS", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 150, "precision": 150, "scale": 0},
+        {"name": "CITY", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 60, "precision": 60, "scale": 0},
+        {"name": "STATE", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "ZIP", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "SEGMENT", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "EFF_DATE", "type_code": "DATE", "odbc_type": "DATE", "nullable": false, "is_key": false, "max_length": 0, "precision": 0, "scale": 0},
+        {"name": "EXP_DATE", "type_code": "DATE", "odbc_type": "DATE", "nullable": false, "is_key": false, "max_length": 0, "precision": 0, "scale": 0},
+        {"name": "CURR_FLAG", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": false, "is_key": false, "max_length": 1, "precision": 1, "scale": 0}
+      ]
+    },
+    {
+      "id": "lnk_Enriched_Out",
+      "fields": [
+        {"name": "TXN_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 25, "precision": 25, "scale": 0},
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "CUST_KEY", "type_code": "INTEGER", "odbc_type": "INTEGER", "nullable": true, "is_key": false, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "SEGMENT", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "STATE", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "PRODUCT_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "STORE_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 15, "precision": 15, "scale": 0},
+        {"name": "CHANNEL", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 15, "precision": 15, "scale": 0},
+        {"name": "TXN_DATE", "type_code": "DATE", "odbc_type": "DATE", "nullable": true, "is_key": false, "max_length": 0, "precision": 0, "scale": 0},
+        {"name": "QTY", "type_code": "INTEGER", "odbc_type": "INTEGER", "nullable": true, "is_key": false, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "UNIT_PRICE", "type_code": "DECIMAL", "odbc_type": "DECIMAL", "nullable": true, "is_key": false, "max_length": 12, "precision": 12, "scale": 2},
+        {"name": "AMOUNT", "type_code": "DECIMAL", "odbc_type": "DECIMAL", "nullable": true, "is_key": false, "max_length": 14, "precision": 14, "scale": 2}
+      ]
+    },
+    {
+      "id": "lnk_Enrich_Reject",
+      "fields": [
+        {"name": "TXN_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 25, "precision": 25, "scale": 0},
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "ERROR_REASON", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 50, "precision": 0, "scale": 0}
+      ]
+    },
+    {
+      "id": "lnk_DQ_Reject",
+      "fields": [
+        {"name": "TXN_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 25, "precision": 25, "scale": 0},
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "ERROR_REASON", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 50, "precision": 0, "scale": 0}
+      ]
+    },
+    {
+      "id": "lnk_ChangeOut",
+      "fields": [
+        {"name": "CHANGE_CODE", "type_code": "INTEGER", "odbc_type": "INTEGER", "nullable": true, "is_key": false, "max_length": 1, "precision": 1, "scale": 0},
+        {"name": "CUST_ID", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "CUST_NAME", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 100, "precision": 100, "scale": 0},
+        {"name": "ADDRESS", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 150, "precision": 150, "scale": 0},
+        {"name": "CITY", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 60, "precision": 60, "scale": 0},
+        {"name": "STATE", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "ZIP", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 10, "precision": 10, "scale": 0},
+        {"name": "SEGMENT", "type_code": "VARCHAR", "odbc_type": "VARCHAR", "nullable": true, "is_key": false, "max_length": 20, "precision": 20, "scale": 0},
+        {"name": "EXISTING_CUST_KEY", "type_code": "INTEGER", "odbc_type": "INTEGER", "nullable": true, "is_key": false, "max_length": 10, "precision": 10, "scale": 0}
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "TGT_CUSTOMER_DIM",
+      "kind": "database",
+      "connection_name": "#DB_CONNECTION#",
+      "table": "CUSTOMER_DIM",
+      "table_qualified": "EDW.CUSTOMER_DIM",
+      "write_mode": "upsert",
+      "pyspark_write_mode": "UNSUPPORTED",
+      "upsert_key_columns": ["CUST_KEY"],
+      "create_statement_postgres": "CREATE TABLE IF NOT EXISTS \"CUSTOMER_DIM\"\n(\"CUST_KEY\" INTEGER NOT NULL,\n\"CUST_ID\" VARCHAR(20) NOT NULL,\n\"CUST_NAME\" VARCHAR(100) NOT NULL,\n\"ADDRESS\" VARCHAR(150),\n\"CITY\" VARCHAR(60),\n\"STATE\" VARCHAR(20),\n\"ZIP\" VARCHAR(10),\n\"SEGMENT\" VARCHAR(20),\n\"EFF_DATE\" DATE NOT NULL,\n\"EXP_DATE\" DATE NOT NULL,\n\"CURR_FLAG\" VARCHAR(1) NOT NULL,\nPRIMARY KEY (\"CUST_KEY\")\n)",
+      "pyspark_methods": ["ensure_table_exists", "write_postgres"]
+    },
+    {
+      "id": "TGT_SALES_FACT",
+      "kind": "database",
+      "connection_name": "#DB_CONNECTION#",
+      "table": "SALES_FACT",
+      "table_qualified": "EDW.SALES_FACT",
+      "write_mode": "insert",
+      "pyspark_write_mode": "append",
+      "upsert_key_columns": [],
+      "create_statement_postgres": "CREATE TABLE IF NOT EXISTS \"SALES_FACT\"\n(\"CUST_KEY\" INTEGER,\n\"PRODUCT_ID\" VARCHAR(20),\n\"STORE_ID\" VARCHAR(15),\n\"TXN_DATE\" DATE,\n\"TOTAL_QTY\" INTEGER,\n\"TOTAL_AMOUNT\" NUMERIC(15, 2),\n\"TXN_COUNT\" INTEGER,\n\"AVG_UNIT_PRICE\" NUMERIC(12, 2),\nPRIMARY KEY (\"CUST_KEY\", \"PRODUCT_ID\", \"STORE_ID\", \"TXN_DATE\")\n)",
+      "pyspark_methods": ["ensure_table_exists", "write_postgres"]
+    },
+    {
+      "id": "TGT_ERROR_LOG",
+      "kind": "file",
+      "file": "#ERR_DIR#/sales_errors_#RUN_DATE#.dat",
+      "write_mode": "overwrite",
+      "pyspark_write_mode": "overwrite",
+      "pyspark_methods": ["write_output"]
+    }
+  ],
+  "stage_census": {
+    "PxSequentialFile": 3,
+    "PxDB2Connector": 3,
+    "PxLookup": 1,
+    "PxTransformer": 2,
+    "PxChangeCapture": 1,
+    "PxSurrogateKeyGenerator": 1,
+    "PxSort": 1,
+    "PxAggregator": 1,
+    "PxFunnel": 1
+  },
+  "table_definitions": [
+    {
+      "id": "SEQ\\CUSTOMER_DELTA",
+      "name": "CUSTOMER_DELTA",
+      "locator": "TableType=\"SEQ\"|DataCollection(Table)=\"customer_delta\"",
+      "columns": [
+        {"name": "CUST_ID", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": true, "key_position": 1},
+        {"name": "CUST_NAME", "type_name": "VARCHAR", "precision": 100, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "ADDRESS", "type_name": "VARCHAR", "precision": 150, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "CITY", "type_name": "VARCHAR", "precision": 60, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "STATE", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "ZIP", "type_name": "VARCHAR", "precision": 10, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "SEGMENT", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "SOURCE_SYSTEM", "type_name": "VARCHAR", "precision": 15, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "EFF_DATE", "type_name": "DATE", "precision": 0, "scale": 0, "nullable": true, "is_key": false, "key_position": 0}
+      ]
+    },
+    {
+      "id": "SEQ\\SALES_TXN",
+      "name": "SALES_TXN",
+      "locator": "TableType=\"SEQ\"|DataCollection(Table)=\"sales_txn\"",
+      "columns": [
+        {"name": "TXN_ID", "type_name": "VARCHAR", "precision": 25, "scale": 0, "nullable": true, "is_key": true, "key_position": 1},
+        {"name": "CUST_ID", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "PRODUCT_ID", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "STORE_ID", "type_name": "VARCHAR", "precision": 15, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "CHANNEL", "type_name": "VARCHAR", "precision": 15, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "TXN_DATE", "type_name": "DATE", "precision": 0, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "QTY", "type_name": "INTEGER", "precision": 10, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "UNIT_PRICE", "type_name": "DECIMAL", "precision": 12, "scale": 2, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "AMOUNT", "type_name": "DECIMAL", "precision": 14, "scale": 2, "nullable": true, "is_key": false, "key_position": 0}
+      ]
+    },
+    {
+      "id": "DB2\\CUSTOMER_DIM",
+      "name": "CUSTOMER_DIM",
+      "locator": "TableType=\"DB2 UDB\"|DataStore(Database)=\"EDW\"|DataSchema(Owner)=\"EDW\"|DataCollection(Table)=\"CUSTOMER_DIM\"",
+      "columns": [
+        {"name": "CUST_KEY", "type_name": "INTEGER", "precision": 10, "scale": 0, "nullable": false, "is_key": true, "key_position": 1},
+        {"name": "CUST_ID", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": false, "is_key": false, "key_position": 0},
+        {"name": "CUST_NAME", "type_name": "VARCHAR", "precision": 100, "scale": 0, "nullable": false, "is_key": false, "key_position": 0},
+        {"name": "ADDRESS", "type_name": "VARCHAR", "precision": 150, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "CITY", "type_name": "VARCHAR", "precision": 60, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "STATE", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "ZIP", "type_name": "VARCHAR", "precision": 10, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "SEGMENT", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "EFF_DATE", "type_name": "DATE", "precision": 0, "scale": 0, "nullable": false, "is_key": false, "key_position": 0},
+        {"name": "EXP_DATE", "type_name": "DATE", "precision": 0, "scale": 0, "nullable": false, "is_key": false, "key_position": 0},
+        {"name": "CURR_FLAG", "type_name": "VARCHAR", "precision": 1, "scale": 0, "nullable": false, "is_key": false, "key_position": 0}
+      ]
+    },
+    {
+      "id": "DB2\\SALES_FACT",
+      "name": "SALES_FACT",
+      "locator": "TableType=\"DB2 UDB\"|DataStore(Database)=\"EDW\"|DataSchema(Owner)=\"EDW\"|DataCollection(Table)=\"SALES_FACT\"",
+      "columns": [
+        {"name": "CUST_KEY", "type_name": "INTEGER", "precision": 10, "scale": 0, "nullable": true, "is_key": true, "key_position": 1},
+        {"name": "PRODUCT_ID", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": true, "key_position": 2},
+        {"name": "STORE_ID", "type_name": "VARCHAR", "precision": 15, "scale": 0, "nullable": true, "is_key": true, "key_position": 3},
+        {"name": "TXN_DATE", "type_name": "DATE", "precision": 0, "scale": 0, "nullable": true, "is_key": true, "key_position": 4},
+        {"name": "TOTAL_QTY", "type_name": "INTEGER", "precision": 10, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "TOTAL_AMOUNT", "type_name": "DECIMAL", "precision": 15, "scale": 2, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "TXN_COUNT", "type_name": "INTEGER", "precision": 10, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "AVG_UNIT_PRICE", "type_name": "DECIMAL", "precision": 12, "scale": 2, "nullable": true, "is_key": false, "key_position": 0}
+      ]
+    },
+    {
+      "id": "SEQ\\SALES_ERRORS",
+      "name": "SALES_ERRORS",
+      "locator": "TableType=\"SEQ\"|DataCollection(Table)=\"sales_errors\"",
+      "columns": [
+        {"name": "TXN_ID", "type_name": "VARCHAR", "precision": 25, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "CUST_ID", "type_name": "VARCHAR", "precision": 20, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "ERROR_REASON", "type_name": "VARCHAR", "precision": 50, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "ERROR_TIMESTAMP", "type_name": "TIMESTAMP", "precision": 0, "scale": 0, "nullable": true, "is_key": false, "key_position": 0},
+        {"name": "RUN_DATE", "type_name": "DATE", "precision": 0, "scale": 0, "nullable": true, "is_key": false, "key_position": 0}
+      ]
+    }
+  ]
+}

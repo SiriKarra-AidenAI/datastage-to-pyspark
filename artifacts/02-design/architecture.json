@@ -1,0 +1,71 @@
+{
+  "current": {
+    "system_name": "IBM DataStage estate",
+    "node_count": 7,
+    "relationship_count": 6,
+    "nodes": [
+      { "id": "flow", "name": "DataStage: JB_CUST_SALES_SCD_AGG", "type": "software_system", "technology": "IBM DataStage 11.7.1 (pxOsh parallel engine)" },
+      { "id": "src-cust-delta", "name": "customer_delta_#RUN_DATE#.dat (CSV)", "type": "external_system", "technology": "CSV file" },
+      { "id": "src-sales-txn", "name": "sales_txn_#RUN_DATE#.dat (CSV)", "type": "external_system", "technology": "CSV file" },
+      { "id": "db-customer-dim", "name": "EDW.CUSTOMER_DIM (DB2)", "type": "database", "technology": "DB2 UDB" },
+      { "id": "db-sales-fact", "name": "EDW.SALES_FACT (DB2)", "type": "database", "technology": "DB2 UDB" },
+      { "id": "src-seq", "name": "EDW.SEQ_CUSTOMER_DIM_KEY (DB2 sequence)", "type": "external_system", "technology": "DB2 Sequence" },
+      { "id": "file-errors", "name": "sales_errors_#RUN_DATE#.dat (CSV)", "type": "external_system", "technology": "CSV file" }
+    ],
+    "relationships": [
+      { "source": "src-cust-delta", "target": "flow", "label": "read (CSV)" },
+      { "source": "src-sales-txn", "target": "flow", "label": "read (CSV)" },
+      { "source": "db-customer-dim", "target": "flow", "label": "read (JDBC reference)" },
+      { "source": "src-seq", "target": "flow", "label": "read (next key value)" },
+      { "source": "flow", "target": "db-customer-dim", "label": "upsert (SCD2)" },
+      { "source": "flow", "target": "db-sales-fact", "label": "insert" },
+      { "source": "flow", "target": "file-errors", "label": "overwrite (CSV)" }
+    ]
+  },
+  "target": {
+    "system_name": "PySpark + Postgres target",
+    "node_count": 9,
+    "relationship_count": 10,
+    "nodes": [
+      { "id": "script", "name": "pyspark_cust_sales_scd_agg.py", "type": "software_system", "technology": "Apache Spark (PySpark)" },
+      { "id": "src-cust-delta", "name": "customer_delta_#RUN_DATE#.dat (CSV)", "type": "external_system", "technology": "CSV file" },
+      { "id": "src-sales-txn", "name": "sales_txn_#RUN_DATE#.dat (CSV)", "type": "external_system", "technology": "CSV file" },
+      { "id": "db-customer-dim", "name": "EDW.CUSTOMER_DIM", "type": "database", "technology": "PostgreSQL" },
+      { "id": "db-sales-fact", "name": "EDW.SALES_FACT", "type": "database", "technology": "PostgreSQL" },
+      { "id": "db-seq", "name": "EDW.SEQ_CUSTOMER_DIM_KEY", "type": "database", "technology": "PostgreSQL SEQUENCE" },
+      { "id": "file-errors", "name": "sales_errors_#RUN_DATE#.dat (CSV)", "type": "external_system", "technology": "CSV file" },
+      { "id": "env", "name": "Environment variables (SRC_DIR, ERR_DIR, RUN_DATE, HIGH_DATE)", "type": "external_system", "technology": "Shell environment" },
+      { "id": "secrets", "name": "Postgres credentials (POSTGRES_HOST:PORT/DB/USER/PASSWORD)", "type": "external_system", "technology": "Secrets manager / env vars" }
+    ],
+    "relationships": [
+      { "source": "src-cust-delta", "target": "script", "label": "spark.read.csv", "technology": "PySpark" },
+      { "source": "src-sales-txn", "target": "script", "label": "spark.read.csv", "technology": "PySpark" },
+      { "source": "db-customer-dim", "target": "script", "label": "spark.read.jdbc (reference)", "technology": "JDBC" },
+      { "source": "db-seq", "target": "script", "label": "read sequence nextval()", "technology": "JDBC" },
+      { "source": "env", "target": "script", "label": "config injection", "technology": "os.environ" },
+      { "source": "secrets", "target": "script", "label": "JDBC credentials", "technology": "env: POSTGRES_PASSWORD" },
+      { "source": "script", "target": "db-customer-dim", "label": "MERGE (upsert SCD2)", "technology": "JDBC" },
+      { "source": "script", "target": "db-sales-fact", "label": "write (append)", "technology": "JDBC" },
+      { "source": "script", "target": "file-errors", "label": "spark.write.csv (overwrite)", "technology": "PySpark" },
+      { "source": "env", "target": "script", "label": "RUN_DATE, HIGH_DATE params", "technology": "os.environ" }
+    ],
+    "containers": [
+      { "name": "read_customer_delta()", "technology": "PySpark" },
+      { "name": "read_sales_txn()", "technology": "PySpark" },
+      { "name": "read_customer_dim_current()", "technology": "PySpark" },
+      { "name": "get_next_cust_key()", "technology": "PySpark" },
+      { "name": "apply_customer_enrichment()", "technology": "PySpark" },
+      { "name": "apply_dq_validation()", "technology": "PySpark" },
+      { "name": "apply_change_capture()", "technology": "PySpark" },
+      { "name": "apply_scd2_rules()", "technology": "PySpark" },
+      { "name": "sort_for_aggregation()", "technology": "PySpark" },
+      { "name": "aggregate_sales()", "technology": "PySpark" },
+      { "name": "funnel_errors()", "technology": "PySpark" },
+      { "name": "ensure_customer_dim_table_exists()", "technology": "PySpark" },
+      { "name": "ensure_sales_fact_table_exists()", "technology": "PySpark" },
+      { "name": "write_customer_dim()", "technology": "PySpark" },
+      { "name": "write_sales_fact()", "technology": "PySpark" },
+      { "name": "write_error_log()", "technology": "PySpark" }
+    ]
+  }
+}
