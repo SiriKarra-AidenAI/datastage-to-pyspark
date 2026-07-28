@@ -1,0 +1,149 @@
+name: Build and Deploy — DataStage to PySpark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - 'src/**'
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: datastage-pyspark-cust-sales-scd-agg
+  SPARK_IMAGE_TAG: 3.5.1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate image tag
+        id: meta
+        run: echo "version=${GITHUB_SHA::8}-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+
+      # ============================================================
+      # OPTION A: AWS ECR
+      # ============================================================
+      - name: Configure AWS credentials
+        if: vars.DEPLOY_TARGET == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: vars.DEPLOY_TARGET == 'aws'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: ${{ vars.AWS_ACCOUNT_ID }}
+
+      - name: Build and push to ECR
+        if: vars.DEPLOY_TARGET == 'aws'
+        run: |
+          docker build -t ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} .
+          docker push ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+      # ============================================================
+      # OPTION B: Azure Container Registry
+      # ============================================================
+      - name: Login to Azure
+        if: vars.DEPLOY_TARGET == 'azure'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        if: vars.DEPLOY_TARGET == 'azure'
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ vars.ACR_REGISTRY }}.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push to ACR
+        if: vars.DEPLOY_TARGET == 'azure'
+        run: |
+          docker build -t ${{ vars.ACR_REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} .
+          docker push ${{ vars.ACR_REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+  # ============================================================
+  # DEPLOY: AWS
+  # ============================================================
+  deploy-aws:
+    if: vars.DEPLOY_TARGET == 'aws'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Register ECS task definition
+        run: |
+          sed -e 's|<ACCOUNT_ID>|${{ vars.AWS_ACCOUNT_ID }}|g' \
+              -e 's|<REGION>|${{ vars.AWS_REGION }}|g' \
+              -e 's|<TAG>|${{ needs.build.outputs.image_tag }}|g' \
+              deploy/aws-ecs-taskdef.json > taskdef.json
+
+      - name: Run Fargate task
+        uses: aws-actions/amazon-ecs-run-task@v1
+        with:
+          task-definition: taskdef.json
+          cluster: ${{ vars.ECS_CLUSTER }}
+          launch-type: FARGATE
+          network-configuration: >
+            awsvpcConfiguration={
+              subnets=[${{ vars.ECS_SUBNETS }}],
+              securityGroups=[${{ vars.ECS_SECURITY_GROUPS }}],
+              assignPublicIp=DISABLED
+            }
+          overrides: >
+            containerOverrides=[{
+              name=${{ env.IMAGE_NAME }},
+              environment=[
+                {name=POSTGRES_HOST,value=${{ secrets.POSTGRES_HOST }}},
+                {name=POSTGRES_PORT,value=5432},
+                {name=POSTGRES_DB,value=${{ secrets.POSTGRES_DB }}},
+                {name=POSTGRES_USER,value=${{ secrets.POSTGRES_USER }}},
+                {name=POSTGRES_PASSWORD,value=${{ secrets.POSTGRES_PASSWORD }}},
+                {name=SRC_DIR,value=/app/data},
+                {name=ERR_DIR,value=/app/data},
+                {name=RUN_DATE,value=${{ vars.RUN_DATE }}}
+              ]
+            }]
+
+  # ============================================================
+  # DEPLOY: Azure
+  # ============================================================
+  deploy-azure:
+    if: vars.DEPLOY_TARGET == 'azure'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Container Apps Job
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az containerapp job update \
+              --name ${{ vars.CONTAINER_APP_JOB }} \
+              --resource-group ${{ vars.RESOURCE_GROUP }} \
+              --image ${{ vars.ACR_REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
+              --set-env-vars \
+                POSTGRES_HOST=${{ secrets.POSTGRES_HOST }} \
+                POSTGRES_PORT=5432 \
+                POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
+                POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
+                POSTGRES_PASSWORD=secretref:${{ secrets.POSTGRES_PASSWORD_KEYVAULT_REF }} \
+                SRC_DIR=/app/data \
+                ERR_DIR=/app/data

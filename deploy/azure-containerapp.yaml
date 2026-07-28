@@ -1,0 +1,43 @@
+# Azure Container Apps Job — DataStage to PySpark
+# Deploy via: az containerapp job create --yaml azure-containerapp.yaml
+# (fill placeholders first, or pass overrides on the command line)
+
+properties:
+  environmentId: <CONTAINER_APP_ENVIRONMENT_ID>
+  configuration:
+    scheduleTriggerConfig: null  # manual trigger (one-shot batch)
+    replicaTimeout: 600          # 10 minutes
+    replicaRetryLimit: 1
+    secrets:
+      - name: postgres-password
+        keyVaultUrl: <KEY_VAULT_URI>/secrets/postgres-password
+    registries:
+      - server: <ACR_REGISTRY>.azurecr.io
+        username: <ACR_USERNAME>
+        passwordSecretRef: acr-password
+  template:
+    containers:
+      - image: <ACR_REGISTRY>.azurecr.io/datastage-pyspark-cust-sales-scd-agg:<TAG>
+        name: datastage-pyspark-cust-sales-scd-agg
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: POSTGRES_HOST
+            value: <POSTGRES_HOST>
+          - name: POSTGRES_PORT
+            value: "5432"
+          - name: POSTGRES_DB
+            value: <POSTGRES_DB>
+          - name: POSTGRES_USER
+            value: <POSTGRES_USER>
+          - name: POSTGRES_PASSWORD
+            secretRef: postgres-password
+          - name: SRC_DIR
+            value: /app/data
+          - name: ERR_DIR
+            value: /app/data
+          - name: RUN_DATE
+            value: <RUN_DATE>
+          - name: HIGH_DATE
+            value: "9999-12-31"

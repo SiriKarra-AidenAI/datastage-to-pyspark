@@ -1,0 +1,39 @@
+{
+  "family": "datastage-pyspark-cust-sales-scd-agg",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+  "taskRoleArn": "<TASK_ROLE_ARN>",
+  "containerDefinitions": [
+    {
+      "name": "datastage-pyspark-cust-sales-scd-agg",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/datastage-pyspark-cust-sales-scd-agg:<TAG>",
+      "essential": true,
+      "cpu": 1024,
+      "memory": 2048,
+      "environment": [
+        { "name": "POSTGRES_HOST", "value": "<POSTGRES_HOST>" },
+        { "name": "POSTGRES_PORT", "value": "5432" },
+        { "name": "POSTGRES_DB",   "value": "<POSTGRES_DB>" },
+        { "name": "POSTGRES_USER", "value": "<POSTGRES_USER>" },
+        { "name": "SRC_DIR",       "value": "/app/data" },
+        { "name": "ERR_DIR",       "value": "/app/data" },
+        { "name": "RUN_DATE",      "value": "<RUN_DATE>" },
+        { "name": "HIGH_DATE",     "value": "9999-12-31" }
+      ],
+      "secrets": [
+        { "name": "POSTGRES_PASSWORD", "valueFrom": "<SECRETS_MANAGER_OR_SSM_ARN>" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/datastage-pyspark",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "cust-sales-scd-agg"
+        }
+      }
+    }
+  ]
+}
